@@ -1,4 +1,4 @@
-const STATIC_CACHE = "mansour-cup-v2";
+const STATIC_CACHE = "mansour-static-v5";
 const DATA_CACHE = "mansour-data-v5";
 
 const STATIC_ASSETS = [
@@ -54,4 +54,42 @@ self.addEventListener("activate", (event) => {
         keys
           .filter((key) => ![STATIC_CACHE, DATA_CACHE].includes(key))
           .map((key) => caches.delete(key))
-     
+      )
+    )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+
+  if (DATA_PATTERNS.some((p) => url.pathname.endsWith(p))) {
+    event.respondWith(
+      fetch(req, { cache: "no-store" })
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(DATA_CACHE).then((cache) => cache.put(req, copy));
+          return res;
+        })
+        .catch(async () => {
+          const cached = await caches.match(req);
+          if (cached) return cached;
+          throw new Error("Network error and no cached data available.");
+        })
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(req).then((cached) => {
+      if (cached) return cached;
+      return fetch(req).then((res) => {
+        const copy = res.clone();
+        caches.open(STATIC_CACHE).then((cache) => cache.put(req, copy));
+        return res;
+      });
+    })
+  );
+});
