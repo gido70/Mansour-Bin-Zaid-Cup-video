@@ -51,33 +51,6 @@ const CupApp = (() => {
     });
   }
 
-
-  async function loadVideos(){
-    try{
-      const res = await fetch('data/videos.json?v=' + Date.now(), { cache: 'no-store' });
-      if(!res.ok) throw new Error('videos not found');
-      return await res.json();
-    }catch(e){
-      return { channel_url: 'https://www.youtube.com/@diwansports/streams', matches: {} };
-    }
-  }
-
-  function getVideoUrl(m, videos){
-    const map = (videos && videos.matches) ? videos.matches : {};
-    const explicit = (m.video_url || map[m.match_code] || "").trim();
-    if(explicit) return explicit;
-    return isPlayed(m) ? ((videos && videos.channel_url) || 'https://www.youtube.com/@diwansports/streams') : "";
-  }
-
-  function videoLinkHTML(m, videos, compact=false){
-    const url = getVideoUrl(m, videos);
-    if(!url) return '';
-    const label = compact ? '🎥 الفيديو' : '🎥 مشاهدة المباراة على يوتيوب';
-    const cls = compact ? '' : ' class="btn" target="_blank" rel="noopener"';
-    return `<a${cls} href="${escapeHTML(url)}" target="_blank" rel="noopener">${label}</a>`;
-  }
-
-
   async function loadMatches(){
     try{
       const res = await fetch('data/matches.csv?v=' + Date.now(), { cache: 'no-store' });
@@ -109,8 +82,7 @@ const CupApp = (() => {
         // VAR (0-2 per team)
         var_team1: m.var_team1 || m.var1 || "",
         var_team2: m.var_team2 || m.var2 || "",
-        match_code: m.match_code || m.code || "",
-        video_url: m.video_url || ""
+        match_code: m.match_code || m.code || ""
       })).filter(m => m.group && m.match_code);
     }catch(e){
       showError(e.message || String(e));
@@ -203,7 +175,7 @@ const CupApp = (() => {
     return arr;
   }
 
-  function renderRecent(matches, videos){
+  function renderRecent(matches){
     const tbl = qs('#tblRecent tbody');
     const badge = qs('#matchesCount');
     if(!tbl || !badge) return;
@@ -212,7 +184,7 @@ const CupApp = (() => {
     tbl.innerHTML = sorted.map(m => {
       const score = isPlayed(m) ? `${m.score1} - ${m.score2}` : '—';
       const link = m.match_code ? `<a href="match.html?id=${encodeURIComponent(m.match_code)}">عرض</a>` : '—';
-      const vlink = videoLinkHTML(m, videos, true);
+      const video = (m.video_url && isPlayed(m)) ? `<a href="${escapeAttr(m.video_url)}" target="_blank" rel="noopener">🎥 الفيديو</a>` : '';
       return `<tr>
         <td>${escapeHTML(m.match_code)}</td>
         <td>${escapeHTML(m.group)}</td>
@@ -221,7 +193,7 @@ const CupApp = (() => {
         <td>${escapeHTML(m.team1)}</td>
         <td class="score">${escapeHTML(score)}</td>
         <td>${escapeHTML(m.team2)}</td>
-        <td>${link}${vlink ? ' &nbsp; ' + vlink : ''}</td>
+        <td>${link}${video ? ' &nbsp; ' + video : ''}</td>
       </tr>`;
     }).join('');
   }
@@ -267,7 +239,7 @@ const CupApp = (() => {
     return { rounds, map };
   }
 
-  function renderGroupMatches(matches, group, videos){
+  function renderGroupMatches(matches, group){
     const wrap = qs('#matchesByRound');
     const badge = qs('#matchesCount');
     if(!wrap || !badge) return;
@@ -283,14 +255,14 @@ const CupApp = (() => {
         const ref = [m.referee1, m.referee2].filter(Boolean).join(' / ') || '—';
         const pom = m.player_of_match || '—';
         const link = m.match_code ? `<a href="match.html?id=${encodeURIComponent(m.match_code)}">تفاصيل</a>` : '';
-        const vlink = videoLinkHTML(m, videos, true);
+        const video = (m.video_url && isPlayed(m)) ? `<a href="${escapeAttr(m.video_url)}" target="_blank" rel="noopener">🎥 الفيديو</a>` : '';
         return `<div class="match-row">
           <div class="pill">${escapeHTML(dt || '—')}</div>
           <div class="dim">${escapeHTML(m.match_code || '')}</div>
           <div>${escapeHTML(m.team1)}</div>
           <div class="score">${escapeHTML(score)}</div>
           <div>${escapeHTML(m.team2)}</div>
-          <div>${link}${vlink ? ' &nbsp; ' + vlink : ''}</div>
+          <div>${link}${video ? ' &nbsp; ' + video : ''}</div>
           <div class="dim" style="grid-column: 1 / -1;">
             حكم: ${escapeHTML(ref)} • أفضل لاعب: ${escapeHTML(pom)}
           </div>
@@ -303,7 +275,7 @@ const CupApp = (() => {
     }).join('');
   }
 
-  function renderMatchPage(matches, matchCode, videos){
+  function renderMatchPage(matches, matchCode){
     const m = matches.find(x => x.match_code === matchCode);
     if(!m){
       showError('لم أجد هذه المباراة. تأكد من id في الرابط.');
@@ -322,6 +294,17 @@ const CupApp = (() => {
     set('matchRef', ref);
     set('matchComm', m.commentator || '—');
     set('matchPOM', m.player_of_match || '—');
+    const videoWrap = qs('#matchVideoWrap');
+    const videoBtn = qs('#matchVideoBtn');
+    if(videoWrap && videoBtn){
+      if(m.video_url && isPlayed(m)){
+        videoBtn.setAttribute('href', m.video_url);
+        videoBtn.classList.remove('hidden');
+        videoWrap.classList.remove('hidden');
+      }else{
+        videoWrap.classList.add('hidden');
+      }
+    }
     // VAR
     // Multi events support (var1..var4). If present, show summary and counts.
     const varEvents = [];
@@ -359,14 +342,6 @@ const CupApp = (() => {
     const score = isPlayed(m) ? `${m.score1} - ${m.score2}` : 'لم تُلعب بعد';
     const scoreLine = qs('#scoreLine');
     if(scoreLine) scoreLine.textContent = `${m.team1}  ${score}  ${m.team2}`;
-
-    const videoWrap = qs('#matchVideoWrap');
-    if(videoWrap){
-      const videoUrl = getVideoUrl(m, videos);
-      videoWrap.innerHTML = videoUrl
-        ? `<div class="btn-row"><a class="btn" href="${escapeHTML(videoUrl)}" target="_blank" rel="noopener">🎥 مشاهدة المباراة على يوتيوب</a></div>`
-        : `<div class="muted">لا يوجد فيديو مضاف لهذه المباراة بعد.</div>`;
-    }
 
     const back = qs('#backToGroup');
     if(back) back.href = `group.html?g=${encodeURIComponent(m.group)}`;
@@ -408,6 +383,8 @@ const CupApp = (() => {
     return t;
   }
 
+  function escapeAttr(str){ return escapeHTML(str).replace(/`/g,''); }
+
   function escapeHTML(str){
     return String(str ?? '')
       .replaceAll('&','&amp;')
@@ -418,18 +395,18 @@ const CupApp = (() => {
   }
 
   async function initIndex(){
-    const [matches, videos] = await Promise.all([loadMatches(), loadVideos()]);
-    renderRecent(matches, videos);
+    const matches = await loadMatches();
+    renderRecent(matches);
   }
 
   async function initGroup(){
     const g = (getParam('g') || 'A').toUpperCase();
     const sub = qs('#pageSub'); if(sub) sub.textContent = `المجموعة ${g}`;
     const title = qs('#grpTitle'); if(title) title.textContent = `الترتيب — المجموعة ${g}`;
-    const [matches, videos] = await Promise.all([loadMatches(), loadVideos()]);
+    const matches = await loadMatches();
     const standings = computeStandings(matches, g);
     renderStandings(standings);
-    renderGroupMatches(matches, g, videos);
+    renderGroupMatches(matches, g);
   }
 
   
@@ -437,11 +414,11 @@ const CupApp = (() => {
     const code = String(stageCode || "").toUpperCase();
     const sub = qs('#pageSub'); if(sub) sub.textContent = titleText || code;
     const title = qs('#stageTitle'); if(title) title.textContent = titleText || code;
-    const [matches, videos] = await Promise.all([loadMatches(), loadVideos()]);
+    const matches = await loadMatches();
     // stage matches are those whose group equals stageCode (e.g., QF/SF/TP/F)
     const stageMatches = matches.filter(m => (m.group||"").toUpperCase() === code);
     const cnt = qs('#matchesCount'); if(cnt) cnt.textContent = String(stageMatches.length);
-    renderGroupMatches(stageMatches, code, videos); // renders into #matchesByRound
+    renderGroupMatches(stageMatches, code); // renders into #matchesByRound
   }
 
   async function initKnockout(){
@@ -451,8 +428,8 @@ const CupApp = (() => {
 
   async function initMatch(){
     const id = getParam('id');
-    const [matches, videos] = await Promise.all([loadMatches(), loadVideos()]);
-    renderMatchPage(matches, id, videos);
+    const matches = await loadMatches();
+    renderMatchPage(matches, id);
   }
 
   return { initIndex, initGroup, initMatch, initStage, initKnockout };
